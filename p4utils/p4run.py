@@ -41,6 +41,7 @@ from p4utils.utils.compiler import P4C as DEFAULT_COMPILER
 from p4utils.utils.client import ThriftClient as DEFAULT_CLIENT
 from p4utils.utils.topology import NetworkGraph
 from p4utils.mininetlib.node import P4Switch as DEFAULT_SWITCH
+from p4utils.mininetlib.node import Router as DEFAULT_ROUTER
 from p4utils.mininetlib.node import P4Host as DEFAULT_HOST
 from p4utils.mininetlib.topo import AppTopoStrategies as DEFAULT_TOPO
 from p4utils.mininetlib.cli import P4CLI
@@ -245,6 +246,14 @@ class AppRunner(object):
             self.host_node = load_custom_object(self.conf.get('host_node'))
         else:
             self.host_node = DEFAULT_HOST
+        
+        # Load default router node
+
+        self.router_node = {}
+        if self.conf.get('router_node', None):
+            self.switch_node = load_custom_object(self.conf.get('router_node'))
+        else:
+            self.router_node = DEFAULT_ROUTER
 
         ## Modules
         # Load default compiler module
@@ -296,6 +305,7 @@ class AppRunner(object):
 
         # Clean default switches
         self.switch_node.stop_all()
+        self.router_node.stop_all()
 
         ## Load topology 
         topology = self.conf.get('topology', False)
@@ -305,6 +315,7 @@ class AppRunner(object):
             # Import topology components
             self.hosts = topology['hosts']
             self.switches = self.parse_switches(topology['switches'])
+            self.routers = self.parse_routers(topology['routers'])
             self.links = self.parse_links(topology['links'])
             self.assignment_strategy = topology['assignment_strategy']
 
@@ -401,8 +412,29 @@ class AppRunner(object):
             # Update switch port numbers
             next_thrift_port = max(next_thrift_port + 1, params['thrift_port'])
             next_grpc_port = max(next_grpc_port + 1, params['grpc_port'])
-    
+        
         return switches
+
+    def parse_routers(self, unparsed_routers):
+        """ Parse the routers from the json file to run FRR on the routers
+
+            Due to the code sturcture requirements, parsing the routers similar to
+            the switches but with minimum requirements?
+        """
+
+        routers = []
+
+        for router, custom_params in unparsed_routers.items():
+            '''Set general default switch options
+            params = {
+                         'router_node': deepcopy(self.router_node)
+            }
+
+            routers[router] = deepcopy(params)'''
+
+            routers.append(router)
+
+        return routers
 
     def parse_links(self, unparsed_links):
         """
@@ -526,15 +558,85 @@ class AppRunner(object):
         # Generate topology
         self.topo = self.app_topo(hosts = self.hosts, 
                                   switches = self.switches,
+                                  routers = self.routers,
                                   links = self.links,
                                   assignment_strategy = self.assignment_strategy)
-
         # Start P4 Mininet
         debug('Starting network...\n')
         self.net = self.app_mininet(topo=self.topo,
                                     intf=TCIntf,
                                     host=self.host_node,
                                     controller=None)
+
+        print(self.net.routers)
+
+    @staticmethod 
+    def start_daemon(node, daemon, conf_dir, extra_params):
+        """Start FRR on a given router"""
+
+        cmd = (("{bin_dir}/{daemon}"
+            " -f {conf_dir}/{node_name}.conf"
+            " -d"
+            " {options}"
+            " --vty_socket {vty_path}/{node_name}/"
+            " -i /tmp/{node_name}-{daemon}.pid"
+            " > /tmp/{node_name}-{daemon}.out 2>&1")
+            .format(bin_dir=FRR_DIR,
+                    daemon=daemon,
+                    options=" ".join(extra_params),
+                    conf_dir=conf_dir,
+                    node_name=node.name,
+                    vty_path=VTY_SOCKET_PATH))
+        #print(cmd)
+        node.cmd(cmd)
+        node.waitOutput()
+
+    @staticmethod 
+    def clean():
+    """Clean up files from previous run.
+    """
+    os.system("rm -f /tmp/r*.log /tmp/r*.pid /tmp/r*.out")
+    os.system("rm -f /tmp/h*.log /tmp/h*.pid /tmp/h*.out")
+    os.system("mn -c >/dev/null 2>&1")
+    os.system("killall -9 {} > /dev/null 2>&1"
+              .format(' '.join(os.listdir(FRR_DIR))))  
+
+
+    # Method to run FRR daemons on the routers
+    def program_routers(self):
+
+        FRR_DIR = "/usr/local/sbin"
+
+        if not os.path.isfile(FRR_DIR + "/" + "zebra"):
+            print("Binaries path {} does not contain daemons!".format(FRR_DIR))
+            exit(0)
+
+        VTY_SOCKET_PATH = "/var/run/"
+
+        if "zebra" in experiment.daemons:
+        assert (experiment.daemons[0] == "zebra")  
+
+        conf_dir = experiment.directory[0]
+
+        for node in self.routers:
+
+            os.system("mkdir {}/{}".format(VTY_SOCKET_PATH, node))
+
+            for daemon in experiment.daemons:
+                options = [" -u root"]
+                if daemon=="zebra":
+                    options  += ["-M fpm"]
+
+                path = daemon
+                _conf_dir = os.path.join(conf_dir, path)
+                #print(_conf_dir)
+                start_daemon(node, daemon, _conf_dir, options)
+
+            if node.name.startswith('r'):
+                # Enable IP forwarding
+                node.cmd("sysctl -w net.ipv4.ip_forward=1")
+                node.waitOutput()
+
 
     def program_hosts(self):
         """

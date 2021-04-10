@@ -5,6 +5,7 @@ from mininet.nodelib import LinuxBridge
 
 from p4utils.utils.helper import *
 from p4utils.mininetlib.node import *
+from node import Router
 
 # The basic idea is to move as many functions as possible
 # from AppTopo to P4Topo in order to make AppTopo a mere
@@ -43,6 +44,22 @@ class P4Topo(Topo):
             opts = self.sopts
         return super().addSwitch(name, isP4Switch=True, **opts)
 
+    def addRouter(self, name, **opts):
+        """ 
+        Add a router to the Mininet topology.
+
+        Arguments:
+            name (string): switch name
+            opts (kwargs): switch options
+
+        Returns:
+            Router name (string)
+        """
+        if not opts and self.sopts:
+            opts = self.sopts
+        return super().addSwitch(name, isRouter=True, **opts)
+
+
     def isP4Switch(self, node):
         """
         Check if node is a P4 switch.
@@ -54,6 +71,18 @@ class P4Topo(Topo):
             True if node is a P4 switch, else False (bool)
         """
         return self.g.node[node].get('isP4Switch', False)
+
+    def isRouter(self, node):
+        """
+        Check if node is a router.
+
+        Arguments:
+            node (string): Mininet node name
+
+        Returns:
+            True if node is a router, else False (bool)
+        """
+        return self.g.node[node].get('isRouter', False)
 
     def addHiddenNode(self, name, **opts):
         """
@@ -92,13 +121,14 @@ class AppTopo(P4Topo):
         assignment_strategy (dict)     : IP and MAC addressing strategy
     """
 
-    def __init__(self, hosts=None, switches=None, links=None, assignment_strategy="l2"):
+    def __init__(self, hosts=None, switches=None, routers = None, links=None, assignment_strategy="l2"):
 
         super().__init__()
         self.assignment_strategy = assignment_strategy
         self._hosts = hosts
         self._switches = switches
         self._links = links
+        self._routers = routers
 
         self.sw_port_mapping = {}
         self.hosts_info = {}
@@ -110,18 +140,23 @@ class AppTopo(P4Topo):
 
         if self.assignment_strategy == "l2":
             self.l2_assignment_strategy()
+            self.add_routers_to_topology()
 
         elif self.assignment_strategy == "mixed":
             self.mixed_assignment_strategy()
+            self.add_routers_to_topology()
 
         elif self.assignment_strategy == "l3":
             self.l3_assignment_strategy()
+            self.add_routers_to_topology()
 
         elif self.assignment_strategy == "manual":
             self.manual_assignment_strategy()
+            self.add_routers_to_topology()
         #default
         else:
             self.mixed_assignment_strategy()
+            self.add_routers_to_topology()
 
     def node_sorting(self, node):
 
@@ -165,9 +200,29 @@ class AppTopo(P4Topo):
 
         return sw_to_id
 
+    def add_routers(self):
+        routers =[]
+
+        for rtr in self._routers.keys():
+                self.addRouter(rtr, cls = Router)
+                                
+        return routers
+
     def is_host_link(self, link):
 
-        return link[0] in self._hosts or link[1] in self._hosts
+        return link[0] in self._hosts or link[1] in self._hosts 
+
+    def is_router_link(self, link):
+
+        return link[0] in self._routers or link[1] in self._routers
+    
+    def is_both_router_link(self, link):
+
+        return link[0] in self._routers and link[1] in self._routers
+
+    def is_switch_link(self, link):
+
+        return link[0] in self._switches and link[1] in self._switches 
 
     def get_host_position(self, link):
 
@@ -176,6 +231,10 @@ class AppTopo(P4Topo):
     def get_sw_position(self, link):
 
         return 0 if link[0] in self._switches else 1
+
+    def get_rtr_position(self, link):
+
+        return 0 if link[0] in self._routers else 1
 
     def check_host_valid_ip_from_name(self, host):
 
@@ -190,22 +249,51 @@ class AppTopo(P4Topo):
         
         return valid
 
+    #First set up P4 topology with hosts, then add routers connecting to the p4 switches"
+    def add_routers_to_topology(self):
+
+        for link in self._links:
+
+            # if router - router connection
+            if self.is_both_router_link(link):
+
+                router_name_1 = link[0]
+                router_name_2= link[1]
+                self.addRouter(router_name_1, cls = Router)
+                self.addRouter(router_name_2, cls = Router)
+
+                self.addLink(router_name_1, router_name_2)
+
+            #if crouter -switch connection 
+            elif self.is_router_link(link):
+                router_name = link[self.get_router_position(link)]
+                sw_name = link[self.get_sw_position(link)]
+
+                self.addRouter(router_name, cls = Router)
+
+                self.addLink(router_name, sw_name)
+                self.addSwitchPort(sw_name, router_name)
+
     def add_cpu_port(self):
+        
         add_bridge = True # We use the bridge but at the same time we use the bug it has so the interfaces are not added to it, but at least we can clean easily thanks to that.
         for switch, params in self._switches.items():
+            print(switches)
             if self.g.node[switch].get('isP4Switch', False):
                 if params['cpu_port']:
                     if add_bridge:
                         sw = self.addSwitch('sw-cpu', cls=LinuxBridge, dpid='1000000000000000')
                         self.addSwitchPort(switch, sw)
+                        #print(sw)
                         add_bridge = False
                     self.addLink(switch, sw, intfName1='{}-cpu-eth0'.format(switch), intfName2= '{}-cpu-eth1'.format(switch), deleteIntfs=True)
+       
 
     def l2_assignment_strategy(self):
 
         self.add_switches()
         ip_generator = IPv4Network('10.0.0.0/16').hosts()
-
+        
         #add links and configure them: ips, macs, etc
         #assumes hosts are connected to one switch only
 
@@ -255,18 +343,23 @@ class AppTopo(P4Topo):
                 self.addLink(host_name, direct_sw, **link_ops)
                 self.addSwitchPort(direct_sw, host_name)
                 self.hosts_info[host_name] = {'sw': direct_sw, 'ip': host_ip, 'mac': host_mac, 'mask': 24}
-
+                
             #switch to switch link
-            else:
+            elif self.is_switch_link(link):
+                print(link)
+
                 self.addLink(link[0], link[1], **link[2])
                 self.addSwitchPort(link[0], link[1])
                 self.addSwitchPort(link[1], link[0])
+            else: 
+                pass
 
         self.add_cpu_port()
         self.printPortMapping()
 
-    def mixed_assignment_strategy(self):
 
+    def mixed_assignment_strategy(self):
+        
         sw_to_id = self.add_switches()
         sw_to_generator = {}
         #change the id to a generator for that subnet
@@ -338,7 +431,7 @@ class AppTopo(P4Topo):
                 self.hosts_info[host_name] = {'sw': direct_sw, 'ip': host_ip, 'mac': host_mac, 'mask': 24}
 
             #switch to switch link
-            else:
+            elif self.is_switch_link(link):
                 self.addLink(link[0], link[1], **link[2])
                 self.addSwitchPort(link[0], link[1])
                 self.addSwitchPort(link[1], link[0])
@@ -411,7 +504,7 @@ class AppTopo(P4Topo):
                 self.hosts_info[host_name] = {'sw': direct_sw, 'ip': host_ip, 'mac': host_mac, 'mask': 24}
 
             # switch to switch link
-            else:
+            elif self.is_switch_link(link):
                 sw1_name = link[0]
                 sw2_name = link[1]
 
@@ -476,8 +569,8 @@ class AppTopo(P4Topo):
                 plane_ip = host_ip.split("/")[0] if host_ip else None
                 self.hosts_info[host_name] = {"sw": direct_sw, "ip":  plane_ip, "mac": host_mac, "mask": 24}
 
-            # switch to switch link
-            else:
+                # switch to switch link
+            elif self.is_switch_link(link):
                 link_ops = link[2]
                 # Get mac address from ip address
                 if link_ops['sw_ip1'] and not link_ops['addr1']:

@@ -19,7 +19,7 @@ import socket
 from time import sleep
 from mininet.log import debug, info, warning
 from mininet.clean import sh
-from mininet.node import Switch, Host
+from mininet.node import Switch, Host, Node
 from mininet.moduledeps import pathCheck
 
 from p4utils.utils.helper import *
@@ -294,3 +294,27 @@ class P4RuntimeSwitch(P4Switch):
         """Describe P4RuntimeSwitch."""
         super().describe()
         print('{} -> gRPC port: {}'.format(self.name, self.grpc_port))
+
+
+class Router(Switch):
+
+    """Router definition built on Mininet switch"""
+
+    ID = 0 
+
+    def __init__(self, name, **kwargs):
+
+        kwargs['inNamespace'] = True 
+        Switch.__init__(self, name, **kwargs)
+
+        Router.ID += 1
+        self.switch_id = Router.ID
+
+    def start(self, controllers):
+        pass
+
+    def defaultIntf(self):
+        if hasattr(self, "controlIntf") and self.controlIntf:
+            return self.controlIntf
+
+        return Node.defaultIntf(self)

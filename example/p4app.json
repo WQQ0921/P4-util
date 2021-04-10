@@ -1,29 +1,26 @@
 {
   "p4_src": "forwarding.p4",
   "cli": true,
-  "pcap_dump": true,
-  "enable_log": true,
+  "pcap_dump": false,
+  "enable_log": false,
   "topology": {
-    "links": [["h1", "s1", {"delay":"20ms", "bw": 20, "max_queue_size": 100, "weight":5}], ["h2", "s2"], ["s1", "s2"], ["h3", "s3"], ["h4", "s3"], ["s1", "s3"]],
+    "assignment_strategy": "l2",
+    "links": [["h1", "s1"], ["h2", "s1"], ["h3", "s1"], ["h4","s1"]],
     "hosts": {
       "h1": {
       },
       "h2": {
-      },
+      }
+      ,
       "h3": {
-      },
+      }
+      ,
       "h4": {
       }
     },
     "switches": {
       "s1": {
         "cli_input": "s1-commands.txt"
-      },
-      "s2": {
-        "cli_input": "s2-commands.txt"
-      },
-      "s3": {
-        "cli_input": "s3-commands.txt"
       }
     }
   }
