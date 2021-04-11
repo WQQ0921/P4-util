@@ -41,11 +41,12 @@ from p4utils.utils.compiler import P4C as DEFAULT_COMPILER
 from p4utils.utils.client import ThriftClient as DEFAULT_CLIENT
 from p4utils.utils.topology import NetworkGraph
 from p4utils.mininetlib.node import P4Switch as DEFAULT_SWITCH
-from p4utils.mininetlib.node import Router as DEFAULT_ROUTER
 from p4utils.mininetlib.node import P4Host as DEFAULT_HOST
+from p4utils.mininetlib.node import Router as DEFAULT_ROUTER
 from p4utils.mininetlib.topo import AppTopoStrategies as DEFAULT_TOPO
 from p4utils.mininetlib.cli import P4CLI
 from p4utils.mininetlib.net import P4Mininet as DEFAULT_NET
+from p4utils.utils.experiment import Experiment
 
 
 class AppRunner(object):
@@ -305,7 +306,7 @@ class AppRunner(object):
 
         # Clean default switches
         self.switch_node.stop_all()
-        self.router_node.stop_all()
+        #self.router_node.stop_all()
 
         ## Load topology 
         topology = self.conf.get('topology', False)
@@ -315,7 +316,7 @@ class AppRunner(object):
             # Import topology components
             self.hosts = topology['hosts']
             self.switches = self.parse_switches(topology['switches'])
-            self.routers = self.parse_routers(topology['routers'])
+            self.routers = self.parse_switches(topology['routers'])
             self.links = self.parse_links(topology['links'])
             self.assignment_strategy = topology['assignment_strategy']
 
@@ -362,17 +363,20 @@ class AppRunner(object):
 
         for switch, custom_params in unparsed_switches.items():
             # Set general default switch options
+           
             params = {
-                         'p4_src': self.conf['p4_src'],
-                         'cpu_port': False,
-                         'switch_node': deepcopy(self.switch_node),
-                         'client_module': deepcopy(self.client_module),
-                         'pcap_dump': self.pcap_dump,
-                         'pcap_dir': self.pcap_dir,
-                         'log_enabled': self.log_enabled,
-                         'thrift_port': next_thrift_port,
-                         'grpc_port': next_grpc_port
-                     }
+                        'p4_src': self.conf['p4_src'],
+                        'cpu_port': False,
+                        'switch_node': deepcopy(self.switch_node),
+                        'client_module': deepcopy(self.client_module),
+                        'pcap_dump': self.pcap_dump,
+                        'pcap_dir': self.pcap_dir,
+                        'log_enabled': self.log_enabled,
+                        'thrift_port': next_thrift_port,
+                        'grpc_port': next_grpc_port
+                    }
+
+            
 
             ## Parse Switch node type
             # Set non default node type (the module JSON is converted into a Switch object)
@@ -402,17 +406,18 @@ class AppRunner(object):
                 kwargs.setdefault('conf_path',custom_params['cli_input'])
             # Add client to list
             self.clients.append(module(sw_name=switch,
-                                       thrift_port=next_thrift_port,
-                                       grpc_port=next_grpc_port,
-                                       **kwargs))
- 
+                                    thrift_port=next_thrift_port,
+                                    grpc_port=next_grpc_port,
+                                    **kwargs))
+
             # Update default parameters with custom ones
             params.update(custom_params)
             switches[switch] = deepcopy(params)
             # Update switch port numbers
             next_thrift_port = max(next_thrift_port + 1, params['thrift_port'])
             next_grpc_port = max(next_grpc_port + 1, params['grpc_port'])
-        
+            
+
         return switches
 
     def parse_routers(self, unparsed_routers):
@@ -422,18 +427,15 @@ class AppRunner(object):
             the switches but with minimum requirements?
         """
 
-        routers = []
+        routers = {}
 
         for router, custom_params in unparsed_routers.items():
-            '''Set general default switch options
+            '''Set general default switch options'''
             params = {
                          'router_node': deepcopy(self.router_node)
             }
 
-            routers[router] = deepcopy(params)'''
-
-            routers.append(router)
-
+            routers[router] = deepcopy(params)
         return routers
 
     def parse_links(self, unparsed_links):
@@ -568,7 +570,6 @@ class AppRunner(object):
                                     host=self.host_node,
                                     controller=None)
 
-        print(self.net.routers)
 
     @staticmethod 
     def start_daemon(node, daemon, conf_dir, extra_params):
@@ -593,13 +594,14 @@ class AppRunner(object):
 
     @staticmethod 
     def clean():
-    """Clean up files from previous run.
-    """
-    os.system("rm -f /tmp/r*.log /tmp/r*.pid /tmp/r*.out")
-    os.system("rm -f /tmp/h*.log /tmp/h*.pid /tmp/h*.out")
-    os.system("mn -c >/dev/null 2>&1")
-    os.system("killall -9 {} > /dev/null 2>&1"
-              .format(' '.join(os.listdir(FRR_DIR))))  
+
+        """Clean up files from previous run.
+        """
+        os.system("rm -f /tmp/r*.log /tmp/r*.pid /tmp/r*.out")
+        os.system("rm -f /tmp/h*.log /tmp/h*.pid /tmp/h*.out")
+        os.system("mn -c >/dev/null 2>&1")
+        os.system("killall -9 {} > /dev/null 2>&1"
+                .format(' '.join(os.listdir(FRR_DIR))))  
 
 
     # Method to run FRR daemons on the routers
@@ -614,7 +616,7 @@ class AppRunner(object):
         VTY_SOCKET_PATH = "/var/run/"
 
         if "zebra" in experiment.daemons:
-        assert (experiment.daemons[0] == "zebra")  
+            assert (experiment.daemons[0] == "zebra")  
 
         conf_dir = experiment.directory[0]
 
@@ -839,6 +841,12 @@ class AppRunner(object):
         # Start Mininet
         self.net.start()
         sleep(1)
+
+        #Load the directory and config to the FRR files
+        experiment = Experiment()
+
+        #Start the daemons on the routers
+        self.program_routers()
 
         # Some programming that must happen after the network has started
         self.program_hosts()

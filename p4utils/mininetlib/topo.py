@@ -5,7 +5,7 @@ from mininet.nodelib import LinuxBridge
 
 from p4utils.utils.helper import *
 from p4utils.mininetlib.node import *
-from node import Router
+
 
 # The basic idea is to move as many functions as possible
 # from AppTopo to P4Topo in order to make AppTopo a mere
@@ -121,15 +121,15 @@ class AppTopo(P4Topo):
         assignment_strategy (dict)     : IP and MAC addressing strategy
     """
 
-    def __init__(self, hosts=None, switches=None, routers = None, links=None, assignment_strategy="l2"):
+    def __init__(self, hosts=None, switches=None, routers= None links=None, assignment_strategy="l2"):
 
         super().__init__()
         self.assignment_strategy = assignment_strategy
         self._hosts = hosts
         self._switches = switches
-        self._links = links
         self._routers = routers
-
+        self._links = links
+        
         self.sw_port_mapping = {}
         self.hosts_info = {}
         self.already_assigned_ips = set()
@@ -201,12 +201,16 @@ class AppTopo(P4Topo):
         return sw_to_id
 
     def add_routers(self):
-        routers =[]
+        
+        router_to_id = {} 
 
-        for rtr in self._routers.keys():
-                self.addRouter(rtr, cls = Router)
-                                
-        return routers
+        for router in self._routers.keys():
+
+            router_attributes = self._routers[router]
+            if issubclass(router_attributes['cls'], Router):
+                self.addRouter(router, **router_attributes)
+                    
+        return router_to_id
 
     def is_host_link(self, link):
 
