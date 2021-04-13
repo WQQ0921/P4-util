@@ -121,7 +121,7 @@ class AppTopo(P4Topo):
         assignment_strategy (dict)     : IP and MAC addressing strategy
     """
 
-    def __init__(self, hosts=None, switches=None, routers= None links=None, assignment_strategy="l2"):
+    def __init__(self, hosts=None, switches=None, routers= None, links=None, assignment_strategy="l2"):
 
         super().__init__()
         self.assignment_strategy = assignment_strategy

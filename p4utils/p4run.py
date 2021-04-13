@@ -316,7 +316,7 @@ class AppRunner(object):
             # Import topology components
             self.hosts = topology['hosts']
             self.switches = self.parse_switches(topology['switches'])
-            self.routers = self.parse_switches(topology['routers'])
+            self.routers = self.parse_routers(topology.get('routers', None))
             self.links = self.parse_links(topology['links'])
             self.assignment_strategy = topology['assignment_strategy']
 
@@ -426,6 +426,9 @@ class AppRunner(object):
             Due to the code sturcture requirements, parsing the routers similar to
             the switches but with minimum requirements?
         """
+
+        if not unparsed_routers:
+            return {}
 
         routers = {}
 
